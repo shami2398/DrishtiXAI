@@ -1,22 +1,24 @@
 """
 Grad-CAM (Gradient-weighted Class Activation Mapping) for Explainability
-
-Generates visual explanations showing which regions the model attended to
-when producing its prediction.
-
-IMPORTANT DISCLAIMER (displayed in the UI):
-  "The highlighted regions show model attention contributing to this
-   prediction. This is not a clinical lesion map or diagnostic finding."
+...
 """
 import hashlib
-import torch
-import torch.nn.functional as F
 import cv2
 import numpy as np
 from PIL import Image
-import torchvision.transforms as transforms
 from typing import Tuple, Dict, Optional
 from pathlib import Path
+
+try:
+    import torch
+    import torch.nn.functional as F
+    import torchvision.transforms as transforms
+    _TORCH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _TORCH_AVAILABLE = False
+    torch = None       # type: ignore
+    F = None           # type: ignore
+    transforms = None  # type: ignore
 
 
 class GradCAM:
@@ -84,20 +86,23 @@ class ExplainabilityEngine:
         self.demo_mode = demo_mode
         self.model     = model
 
-        if not demo_mode and model is not None:
+        if not demo_mode and model is not None and _TORCH_AVAILABLE:
             target_layer  = self._get_target_layer(model)
             self.gradcam  = GradCAM(model, target_layer)
         else:
             self.gradcam = None
 
-        self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
-            ),
-        ])
+        if _TORCH_AVAILABLE:
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                ),
+            ])
+        else:
+            self.transform = None
 
     def _get_target_layer(self, model):
         """Return the last convolutional layer (EfficientNet-B0 features[-1])."""

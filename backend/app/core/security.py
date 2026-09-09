@@ -4,21 +4,28 @@ Security utilities: JWT tokens, password hashing, authentication
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from .config import settings
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use bcrypt directly — passlib has a known compatibility bug with Python 3.14
+# that causes a ValueError during backend detection. We bypass it here.
+try:
+    import bcrypt as _bcrypt
 
+    def get_password_hash(password: str) -> str:
+        return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against hashed password"""
-    return pwd_context.verify(plain_password, hashed_password)
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        return _bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
+except Exception:  # pragma: no cover — fallback to passlib if bcrypt unavailable
+    from passlib.context import CryptContext
+    _ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-def get_password_hash(password: str) -> str:
-    """Hash a plain password"""
-    return pwd_context.hash(password)
+    def get_password_hash(password: str) -> str:  # type: ignore
+        return _ctx.hash(password)
+
+    def verify_password(plain_password: str, hashed_password: str) -> bool:  # type: ignore
+        return _ctx.verify(plain_password, hashed_password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
