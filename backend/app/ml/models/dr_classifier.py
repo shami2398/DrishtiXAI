@@ -1,42 +1,28 @@
 """
 Diabetic Retinopathy Classification Model
 Supports both real trained models and demo mode.
-
-In demo mode: uses real image analysis (colour, contrast, brightness, vascular
-texture) to generate a clinically-plausible prediction — NOT random noise.
-
-Result states
-─────────────
-The model produces one of three high-level outcomes:
-
-  STATE A — No supported abnormality detected
-    severity == 0, is_diabetic == False
-    Wording: "No supported abnormality detected in this image."
-
-  STATE B — Possible abnormality detected
-    severity 1–4, is_diabetic == True
-    Wording: "Possible [severity label] detected."
-
-  STATE C — Unable to reliably analyse
-    Triggered externally by quality gate; the model itself does not
-    produce this state — the screening service handles it before
-    reaching prediction.
-
-Confidence note
-───────────────
-Model confidence is the softmax probability of the predicted class.
-It reflects prediction certainty for this image, NOT the probability
-that the patient has the disease.
+...
 """
 import cv2
 import numpy as np
-import torch
-import torch.nn as nn
-import torchvision.models as models
-import torchvision.transforms as transforms
 from PIL import Image
 from typing import Dict
 from pathlib import Path
+
+# Torch is only required in real (non-demo) mode.
+# Import lazily so the server can start without GPU/torch in demo mode.
+try:
+    import torch
+    import torch.nn as nn
+    import torchvision.models as models
+    import torchvision.transforms as transforms
+    _TORCH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _TORCH_AVAILABLE = False
+    torch = None  # type: ignore
+    nn = None  # type: ignore
+    models = None  # type: ignore
+    transforms = None  # type: ignore
 
 
 class DRClassifier:
@@ -77,22 +63,25 @@ class DRClassifier:
     def __init__(self, model_path: str = None, demo_mode: bool = True):
         self.demo_mode  = demo_mode
         self.model_path = model_path
-        self.device     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device     = torch.device("cuda" if torch.cuda.is_available() else "cpu") if _TORCH_AVAILABLE else None
         self.model      = None
 
-        if not demo_mode and model_path and Path(model_path).exists():
+        if not demo_mode and model_path and Path(model_path).exists() and _TORCH_AVAILABLE:
             self._load_model(model_path)
         else:
-            self.demo_mode = True   # force demo if weights unavailable
+            self.demo_mode = True   # force demo if weights unavailable or torch missing
 
-        self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
-            ),
-        ])
+        if _TORCH_AVAILABLE:
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                ),
+            ])
+        else:
+            self.transform = None
 
     # ──────────────────────────────────────────────────────────────────
     # Model loading (real mode)
